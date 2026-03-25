@@ -1,0 +1,2 @@
+# For running Modal app (remote inference); heavy deps are in the Modal image.
+modal>=0.64.0
