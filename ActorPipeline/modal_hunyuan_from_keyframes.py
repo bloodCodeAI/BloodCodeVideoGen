@@ -11,6 +11,8 @@ the clips, and stores outputs under:
 Usage:
   modal run ActorPipeline/modal_hunyuan_from_keyframes.py --keyframe-run-id <run_id>
   modal run ActorPipeline/modal_hunyuan_from_keyframes.py --keyframe-run-id <run_id> --i2v-steps 20 --num-frames 81
+  modal run ActorPipeline/modal_hunyuan_from_keyframes.py --keyframe-run-id <run_id> --scenario-path ActorPipeline/squatt_scenario.json
+  modal run ActorPipeline/modal_hunyuan_from_keyframes.py --keyframe-run-id <run_id> --scenario-path ActorPipeline/squatt_scenario.json --lock-end-keyframe
 """
 
 from __future__ import annotations
@@ -80,6 +82,42 @@ def _default_transition_prompt(i: int) -> str:
     return prompts[i % len(prompts)]
 
 
+def _load_transition_prompts_from_scenario(scenario_path: Path) -> list[str]:
+    if not scenario_path.exists():
+        raise FileNotFoundError(f"Scenario JSON not found: {scenario_path}")
+
+    data = json.loads(scenario_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("Scenario JSON root must be an object.")
+    steps = data.get("steps")
+    if not isinstance(steps, list) or len(steps) < 2:
+        raise ValueError("Scenario JSON must include at least 2 steps.")
+
+    sorted_steps = sorted(
+        [s for s in steps if isinstance(s, dict)],
+        key=lambda x: x.get("k", 0),
+    )
+    if len(sorted_steps) < 2:
+        raise ValueError("Scenario JSON must include at least 2 valid step objects.")
+
+    style = data.get("global_style")
+    style_suffix = f" {style}" if isinstance(style, str) and style.strip() else ""
+
+    transition_prompts: list[str] = []
+    for i in range(len(sorted_steps) - 1):
+        a = str(sorted_steps[i].get("prompt", "")).strip()
+        b = str(sorted_steps[i + 1].get("prompt", "")).strip()
+        if not a or not b:
+            raise ValueError(
+                f"Scenario step transition {i + 1}->{i + 2} missing non-empty prompt."
+            )
+        transition_prompts.append(
+            "A fitness instructor transitions smoothly and realistically from the current pose to the next pose. "
+            f"Start state: {a}. End state: {b}.{style_suffix}"
+        )
+    return transition_prompts
+
+
 @app.cls(
     image=image,
     gpu="H100",
@@ -108,6 +146,9 @@ class HunyuanFromKeyframes:
         self,
         keyframe_run_id: str,
         video_run_id: str,
+        scenario_transition_prompts: list[str] | None = None,
+        lock_end_keyframe: bool = True,
+        end_blend_frames: int = 6,
         num_frames: int = DEFAULT_NUM_FRAMES,
         i2v_steps: int = DEFAULT_I2V_STEPS,
         fps: int = DEFAULT_FPS,
@@ -133,8 +174,17 @@ class HunyuanFromKeyframes:
 
         for i in range(len(keyframes) - 1):
             start_img = self.PILImage.open(keyframes[i]).convert("RGB")
-            prompt = _default_transition_prompt(i)
+            end_img = self.PILImage.open(keyframes[i + 1]).convert("RGB")
+            if scenario_transition_prompts and i < len(scenario_transition_prompts):
+                prompt = scenario_transition_prompts[i]
+            else:
+                prompt = _default_transition_prompt(i)
             transition_prompts.append(prompt)
+            print(
+                f"[{i + 1}/{len(keyframes) - 1}] Generating segment from {keyframes[i].name} to {keyframes[i + 1].name}",
+                flush=True,
+            )
+            print(f"[{i + 1}/{len(keyframes) - 1}] Prompt: {prompt}", flush=True)
 
             t_seg = time.time()
             out = self.pipe_i2v(
@@ -149,6 +199,16 @@ class HunyuanFromKeyframes:
             print(f"  Segment {i + 1}/{len(keyframes) - 1}: {dt:.1f}s", flush=True)
 
             out_list = _frames_to_pil_list(out, self.np, self.PILImage)
+            # Endpoint lock: force the clip to land on the next keyframe by blending
+            # the last N frames toward the known target keyframe image.
+            if lock_end_keyframe and out_list:
+                target = end_img.resize(out_list[0].size).convert("RGB")
+                blend_n = max(1, min(end_blend_frames, len(out_list)))
+                for j in range(1, blend_n + 1):
+                    idx = len(out_list) - blend_n + (j - 1)
+                    alpha = j / float(blend_n)
+                    out_list[idx] = self.PILImage.blend(out_list[idx].convert("RGB"), target, alpha)
+
             tmp_seg = f"/tmp/hunyuan_actor_seg_{i + 1:03d}.mp4"
             export_to_video(out_list, tmp_seg, fps=fps)
             dst = out_base / f"segment_{i + 1:03d}.mp4"
@@ -174,6 +234,8 @@ class HunyuanFromKeyframes:
                 "num_frames_per_segment": num_frames,
                 "i2v_steps": i2v_steps,
                 "fps": fps,
+                "lock_end_keyframe": lock_end_keyframe,
+                "end_blend_frames": end_blend_frames,
             },
             "timing": {
                 "cold_start_s": self.cold_start_s,
@@ -196,19 +258,34 @@ class HunyuanFromKeyframes:
 @app.local_entrypoint()
 def main(
     keyframe_run_id: str,
+    scenario_path: str = "",
+    lock_end_keyframe: bool = True,
+    end_blend_frames: int = 6,
     i2v_steps: int = DEFAULT_I2V_STEPS,
     num_frames: int = DEFAULT_NUM_FRAMES,
     fps: int = DEFAULT_FPS,
 ):
+    transition_prompts = None
+    if scenario_path:
+        transition_prompts = _load_transition_prompts_from_scenario(Path(scenario_path))
+
     video_run_id = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S") + "_actor_hunyuan"
     print(f"Creating Hunyuan video from keyframes: {keyframe_run_id}")
     print(f"Video run ID: {video_run_id}")
     print(f"Output: my-volume/{VIDEO_SUBFOLDER}/{video_run_id}/")
-    print(f"Config: i2v_steps={i2v_steps}, num_frames={num_frames}, fps={fps}")
+    if scenario_path:
+        print(f"Scenario: {scenario_path}")
+    print(
+        f"Config: i2v_steps={i2v_steps}, num_frames={num_frames}, fps={fps}, "
+        f"lock_end_keyframe={lock_end_keyframe}, end_blend_frames={end_blend_frames}"
+    )
 
     meta = HunyuanFromKeyframes().run.remote(
         keyframe_run_id=keyframe_run_id,
         video_run_id=video_run_id,
+        scenario_transition_prompts=transition_prompts,
+        lock_end_keyframe=lock_end_keyframe,
+        end_blend_frames=end_blend_frames,
         i2v_steps=i2v_steps,
         num_frames=num_frames,
         fps=fps,

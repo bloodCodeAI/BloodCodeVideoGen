@@ -59,3 +59,19 @@ Contains:
 - `train_dreambooth_lora_sdxl.py` from Hugging Face diffusers is used for training.
 - Training uses LoRA + 8-bit Adam for lower memory and faster optimization.
 - For best identity quality, keep 20–30 diverse actor photos with full-body + face coverage.
+
+## Two-endpoint transition skeleton
+
+If you need strict `Ki -> K{i+1}` behavior (first+last frame conditioning), use:
+
+```bash
+modal run ActorPipeline/modal_two_endpoint_from_keyframes.py --keyframe-run-id <keyframe_run_id> --scenario-path ActorPipeline/squatt_scenario.json
+```
+
+This file is a backend skeleton and includes:
+- keyframe pair planning
+- scenario transition prompt mapping
+- segment boundary-safe concatenation
+- a backend hook (`_generate_segment_with_backend`) where you integrate a model that supports first+last frame conditioning
+
+Suggested first backend to wire: **Wan 2.1 FLF2V** (first/last frame image-to-video).

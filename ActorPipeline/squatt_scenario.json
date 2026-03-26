@@ -1,0 +1,58 @@
+{
+  "scenario_id": "squatt_scenario_v1",
+  "pose_root_dir": "c:/Python/BloodCodeAi/BloodCodeVideoGen/posesImages/squattScenario",
+  "global_style": "full body, bright gym, photorealistic, realistic anatomy, consistent outfit, stable camera",
+  "negative_prompt": "blurry, low quality, extra limbs, deformed, cartoon, illustration, text, watermark",
+  "poses": {
+    "stand_front_talk": {
+      "file": "stand_front_talk.avif"
+    },
+    "squat_descent_front_1": {
+      "file": "squat_descent_front_1.PNG"
+    },
+    "squatt_bottom_front": {
+      "file": "squatt_bottom_front.PNG"
+    },
+    "squatt_bottom_side": {
+      "file": "squatt_bottom_side.PNG"
+    },
+    "squatt_rise_3qt_front": {
+      "file": "squatt_rise_3qt_front.PNG"
+    },
+    "stand_front_finish": {
+      "file": "stand_front_finish.PNG"
+    }
+  },
+  "steps": [
+    {
+      "k": 1,
+      "pose_id": "stand_front_talk",
+      "prompt": "front view, trainer standing in front of camera and explaining exercise with subtle silent mouth movement"
+    },
+    {
+      "k": 2,
+      "pose_id": "squat_descent_front_1",
+      "prompt": "front view, trainer starts descending into squat with controlled posture"
+    },
+    {
+      "k": 3,
+      "pose_id": "squatt_bottom_front",
+      "prompt": "front view, trainer reaches squat bottom position, knees aligned and chest lifted"
+    },
+    {
+      "k": 4,
+      "pose_id": "squatt_bottom_side",
+      "prompt": "profile view, trainer holds squat and continues form explanation"
+    },
+    {
+      "k": 5,
+      "pose_id": "squatt_rise_3qt_front",
+      "prompt": "three quarter front view, trainer rises from squat with controlled ascent"
+    },
+    {
+      "k": 6,
+      "pose_id": "stand_front_finish",
+      "prompt": "front view, trainer returns to upright neutral finish pose facing camera"
+    }
+  ]
+}
